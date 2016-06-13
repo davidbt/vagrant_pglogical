@@ -1,0 +1,39 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+Vagrant.configure(2) do |config|
+  #config.vm.box = "ubuntu/xenial64" # it has a problem with the network
+  config.vm.box = "geerlingguy/ubuntu1604"
+
+  config.vm.network "private_network", ip: "192.168.33.100"
+  # config.vm.synced_folder "../data", "/vagrant_data"
+
+  config.vm.provider "virtualbox" do |vb|
+    vb.memory = "2048"
+    vb.name = "pglogical-master"
+  end
+
+  config.vm.provision "shell", inline: <<-SHELL
+    sudo echo "deb [arch=amd64] http://packages.2ndquadrant.com/pglogical/apt/ xenial-2ndquadrant main" > /etc/apt/sources.list.d/2ndquadrant.list
+    wget --quiet -O - http://packages.2ndquadrant.com/pglogical/apt/AA7A6805.asc | sudo apt-key add -
+    sudo apt-get update
+    sudo apt-get dist-upgrade -y
+    sudo apt-get install postgresql -y
+    sudo apt-get install postgresql-9.5-pglogical -y
+    sudo sed -i "59 i listen_addresses = '*'" /etc/postgresql/9.5/main/postgresql.conf
+    sudo sed -i "149 i shared_preload_libraries = 'pglogical'" /etc/postgresql/9.5/main/postgresql.conf
+    sudo sed -i "178 i wal_level = 'logical'" /etc/postgresql/9.5/main/postgresql.conf
+    sudo sed -i "229 i max_wal_senders = 10" /etc/postgresql/9.5/main/postgresql.conf
+    sudo sed -i "236 i max_replication_slots = 10" /etc/postgresql/9.5/main/postgresql.conf
+    # NEEDS BETTER SECURITY
+    sudo sed -i "92 i host    all             all             127.0.0.1/32            trust" /etc/postgresql/9.5/main/pg_hba.conf
+    sudo sed -i "93 i host    all             all             192.168.33.101/32            trust" /etc/postgresql/9.5/main/pg_hba.conf
+    sudo sed -i "101 i host   replication     postgres        192.168.33.101/32       trust" /etc/postgresql/9.5/main/pg_hba.conf
+    sudo service postgresql restart
+    sudo su postgres -c "createdb test"
+    echo "CREATE EXTENSION pglogical;" | sudo su postgres -c "psql test"
+    echo "SELECT pglogical.create_node(node_name := 'provider1', dsn := 'host=192.168.33.100 port=5432 dbname=test');" | sudo su postgres -c "psql test"
+    echo "create table table1 (id serial not null primary key, txt text);" | sudo su postgres -c "psql test"
+    echo "SELECT pglogical.replication_set_add_all_tables('default', ARRAY['public']);" | sudo su postgres -c "psql test"
+  SHELL
+end
